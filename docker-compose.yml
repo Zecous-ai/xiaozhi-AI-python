@@ -1,0 +1,43 @@
+version: "3.8"
+
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: xiaozhi
+      MYSQL_USER: xiaozhi
+      MYSQL_PASSWORD: 123456
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: xiaozhi
+      MYSQL_PASSWORD: 123456
+      MYSQL_DB: xiaozhi
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "8091:8091"
+    depends_on:
+      - mysql
+      - redis
+
+volumes:
+  mysql_data:
