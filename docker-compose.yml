@@ -38,6 +38,8 @@ services:
     depends_on:
       - mysql
       - redis
+    volumes:
+      - ./audio:/app/backend/audio
 
 volumes:
   mysql_data:

@@ -22,7 +22,20 @@ from app.communication.session import ChatSession, session_manager
 from app.core.config import settings
 from app.services.device_service import SysDeviceService
 from app.dialogue.dialogue_service import DialogueService
+from app.dialogue.intent_detector import IntentDetector
+from app.dialogue.iot_service import IotService
+from app.dialogue.device_mcp import DeviceMcpService
+from app.dialogue.llm.chat_service import ChatService
+from app.dialogue.llm.factory import ChatModelFactory
+from app.dialogue.mcp_session_manager import McpSessionManager
+from app.dialogue.memory import ConversationFactory, DatabaseChatMemory
 from app.dialogue.message_service import MessageService
+from app.dialogue.stt.factory import SttServiceFactory
+from app.dialogue.token_service import TokenServiceFactory
+from app.dialogue.tool_functions import ChangeRoleFunction, NewChatFunction, SessionExitFunction
+from app.dialogue.tools import ToolsGlobalRegistry
+from app.dialogue.tts.factory import TtsServiceFactory
+from app.dialogue.vad.vad_service import VadService
 from app.services.config_service import SysConfigService
 from app.services.role_service import SysRoleService
 from app.services.sys_message_service import SysMessageService
@@ -88,8 +101,55 @@ config_service = SysConfigService()
 role_service = SysRoleService()
 message_service = MessageService()
 sys_message_service = SysMessageService()
-dialogue_service = DialogueService(config_service, role_service, message_service, sys_message_service)
-handler = MessageHandler(device_service, dialogue_service)
+token_factory = TokenServiceFactory()
+stt_factory = SttServiceFactory(token_factory)
+tts_factory = TtsServiceFactory(token_factory)
+chat_model_factory = ChatModelFactory(config_service, role_service)
+chat_memory = DatabaseChatMemory(sys_message_service)
+conversation_factory = ConversationFactory(chat_memory)
+
+tools_registry = ToolsGlobalRegistry(
+    [
+        SessionExitFunction(),
+        NewChatFunction(),
+        ChangeRoleFunction(role_service, device_service, conversation_factory),
+    ]
+)
+mcp_session_manager = McpSessionManager(tools_registry)
+chat_service = ChatService(chat_model_factory, mcp_session_manager, sys_message_service)
+intent_detector = IntentDetector()
+vad_service = VadService(role_service, session_manager)
+vad_service.configure(settings.vad_prebuffer_ms, settings.vad_tail_keep_ms, settings.vad_audio_enhancement_enabled)
+iot_service = IotService(session_manager, message_service)
+device_mcp_service = DeviceMcpService(settings.mcp_max_tools_count)
+
+dialogue_service = DialogueService(
+    config_service,
+    role_service,
+    message_service,
+    sys_message_service,
+    vad_service,
+    stt_factory,
+    tts_factory,
+    chat_service,
+    intent_detector,
+)
+session_manager.configure(dialogue_service, device_service)
+handler = MessageHandler(
+    device_service,
+    config_service,
+    role_service,
+    message_service,
+    sys_message_service,
+    vad_service,
+    dialogue_service,
+    tts_factory,
+    stt_factory,
+    conversation_factory,
+    tools_registry,
+    iot_service,
+    device_mcp_service,
+)
 
 
 async def _handle_ws(websocket: WebSocket):

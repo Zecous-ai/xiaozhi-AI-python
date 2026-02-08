@@ -123,5 +123,21 @@ class SysMessageService:
             },
         )
 
+    def update_message_type(self, device_id: str, role_id: int, sender: str, create_time: str, message_type: str) -> int:
+        sql = (
+            "UPDATE sys_message SET messageType = :messageType "
+            "WHERE deviceId = :deviceId AND roleId = :roleId AND sender = :sender AND createTime = :createTime"
+        )
+        return db().execute(
+            sql,
+            {
+                "messageType": message_type,
+                "deviceId": device_id,
+                "roleId": role_id,
+                "sender": sender,
+                "createTime": create_time,
+            },
+        )
+
 
 __all__ = ["SysMessageService"]

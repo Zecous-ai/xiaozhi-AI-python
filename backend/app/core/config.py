@@ -1,7 +1,12 @@
 ﻿from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
+
+
+BASE_DIR = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
@@ -33,6 +38,7 @@ class Settings(BaseSettings):
 
     # Upload
     upload_path: str = "uploads"
+    audio_path: str = str(BASE_DIR / "audio")
 
     # WebSocket
     websocket_path: str = "/ws/xiaozhi/v1/"
@@ -41,6 +47,16 @@ class Settings(BaseSettings):
     # Session
     check_inactive_session: bool = True
     inactive_timeout_seconds: int = 20
+
+    # VAD / STT
+    vad_model_path: str = str(BASE_DIR / "models" / "silero_vad.onnx")
+    vosk_model_path: str = str(BASE_DIR / "models" / "vosk-model")
+    vad_prebuffer_ms: int = 500
+    vad_tail_keep_ms: int = 300
+    vad_audio_enhancement_enabled: bool = False
+
+    # MCP
+    mcp_max_tools_count: int = 32
 
     # COS
     tencent_cos_secret_id: str | None = None
