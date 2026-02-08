@@ -15,12 +15,16 @@ template_service = SysTemplateService()
 @router.get("")
 async def list_templates(request: Request, user=Depends(get_current_user)):
     params = request.query_params
-    templates = template_service.query(
-        user.get("userId"), params.get("templateName"), params.get("category")
+    page_num = int(params.get("start", 1))
+    page_size = int(params.get("limit", 10))
+    page = template_service.query(
+        user.get("userId"),
+        params.get("templateName"),
+        params.get("category"),
+        page_num,
+        page_size,
     )
-    result = ResultMessage.success()
-    result["data"] = {"list": templates, "total": len(templates)}
-    return result
+    return ResultMessage.success(data=page)
 
 
 @router.post("")
@@ -45,4 +49,3 @@ async def update_template(template_id: int, request: Request, user=Depends(get_c
 async def delete_template(template_id: int, user=Depends(get_current_user)):
     template_service.delete(template_id)
     return ResultMessage.success("删除成功")
-

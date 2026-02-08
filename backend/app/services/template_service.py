@@ -3,10 +3,18 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from app.db.database import db
+from app.utils.pagination import build_page
 
 
 class SysTemplateService:
-    def query(self, user_id: int, template_name: Optional[str] = None, category: Optional[str] = None) -> List[Dict]:
+    def query(
+        self,
+        user_id: int,
+        template_name: Optional[str] = None,
+        category: Optional[str] = None,
+        page_num: Optional[int] = None,
+        page_size: Optional[int] = None,
+    ) -> List[Dict] | Dict:
         where = ["state = 1", "userId = :userId"]
         params = {"userId": user_id}
         if template_name:
@@ -15,11 +23,21 @@ class SysTemplateService:
         if category:
             where.append("category = :category")
             params["category"] = category
-        sql = (
+        where_sql = " AND ".join(where)
+        base_sql = (
             "SELECT userId, templateId, templateName, templateDesc, templateContent, category, isDefault, state, createTime, updateTime "
-            f"FROM sys_template WHERE {' AND '.join(where)} ORDER BY isDefault, createTime DESC"
+            f"FROM sys_template WHERE {where_sql} ORDER BY isDefault, createTime DESC"
         )
-        return db().fetch_all(sql, params)
+        if page_num is not None and page_size is not None:
+            normalized_page = page_num if page_num > 0 else 1
+            normalized_size = page_size if page_size > 0 else 10
+            total_sql = f"SELECT count(*) FROM sys_template WHERE {where_sql}"
+            total = db().fetch_value(total_sql, params) or 0
+            page_sql = base_sql + " LIMIT :limit OFFSET :offset"
+            page_params = {**params, "limit": normalized_size, "offset": (normalized_page - 1) * normalized_size}
+            rows = db().fetch_all(page_sql, page_params)
+            return build_page(rows, int(total), normalized_page, normalized_size)
+        return db().fetch_all(base_sql, params)
 
     def select_by_id(self, template_id: int) -> Optional[Dict]:
         sql = (
