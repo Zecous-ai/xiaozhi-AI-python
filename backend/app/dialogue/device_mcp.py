@@ -17,13 +17,14 @@ logger = logging.getLogger("device_mcp")
 @dataclass
 class DeviceMcpHolder:
     mcp_initialized: bool = False
-    mcp_cursor: Optional[str] = None
-    _request_id: int = 1
+    mcp_cursor: Optional[str] = ""
+    _request_id: int = 10000
     pending_requests: Dict[int, asyncio.Future] = field(default_factory=dict)
 
     def next_request_id(self) -> int:
+        current = self._request_id
         self._request_id += 1
-        return self._request_id
+        return current
 
 
 class DeviceMcpService:
