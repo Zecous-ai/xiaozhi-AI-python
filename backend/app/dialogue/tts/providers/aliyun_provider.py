@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import uuid
 
 try:
     import dashscope  # type: ignore
@@ -35,34 +37,39 @@ class AliyunTtsService:
 
     def text_to_speech(self, text: str) -> str:
         if dashscope is None:
-            logger.warning("dashscope 未安装，使用 Edge TTS 回退")
+            logger.warning("dashscope package missing, fallback to Edge")
             return self._fallback.text_to_speech(text)
+
         api_key = self.config.get("apiKey")
         if not api_key:
-            logger.warning("Aliyun TTS 缺少 apiKey，使用 Edge TTS 回退")
+            logger.warning("Aliyun TTS missing apiKey, fallback to Edge")
             return self._fallback.text_to_speech(text)
-        try:
-            # 兼容最常用的 DashScope TTS 接口
-            dashscope.api_key = api_key
-            from dashscope.audio.tts import SpeechSynthesizer, SpeechSynthesisParam  # type: ignore
 
-            param = SpeechSynthesisParam(
+        try:
+            dashscope.api_key = api_key
+            result = dashscope.SpeechSynthesizer.call(
                 model=self.voice_name,
                 text=text,
-                rate=self.speed,
-                pitch=self.pitch,
                 format="wav",
                 sample_rate=16000,
+                rate=float(self.speed),
+                pitch=float(self.pitch),
             )
-            synthesizer = SpeechSynthesizer()
-            result = synthesizer.call(param)
-            audio = getattr(result, "audio", None) or getattr(result, "get_audio", lambda: None)()
-            if not audio:
+            audio_data = None
+            if result is not None:
+                audio_data = result.get_audio_data()
+
+            if not audio_data:
+                logger.error("Aliyun TTS returned empty audio, fallback to Edge")
                 return self._fallback.text_to_speech(text)
-            out_path = self._fallback.text_to_speech(text)
+
+            os.makedirs(self.output_path, exist_ok=True)
+            out_path = os.path.join(self.output_path, f"{uuid.uuid4().hex}.wav").replace("\\", "/")
+            with open(out_path, "wb") as f:
+                f.write(audio_data)
             return out_path
         except Exception as exc:
-            logger.error("Aliyun TTS 调用失败，使用 Edge TTS 回退: %s", exc)
+            logger.error("Aliyun TTS error, fallback to Edge: %s", exc)
             return self._fallback.text_to_speech(text)
 
 
