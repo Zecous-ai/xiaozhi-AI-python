@@ -10,7 +10,7 @@ def _exclude(data: Dict, keys: List[str]) -> Dict:
 def user_to_dto(user: Optional[Dict]) -> Optional[Dict]:
     if not user:
         return None
-    return _exclude(user, ["password"])
+    return _exclude(user, ["password", "wxOpenId", "wxUnionId"])
 
 
 def device_to_dto(device: Optional[Dict]) -> Optional[Dict]:

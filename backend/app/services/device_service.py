@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from typing import Dict, List, Optional
 import random
@@ -8,20 +8,20 @@ from app.utils.pagination import build_page
 
 
 class SysDeviceService:
-    def query(self, filters: Dict, page_num: int, page_size: int) -> Dict:
+    def _build_query_conditions(self, filters: Dict) -> tuple[str, Dict]:
         where = ["1=1"]
-        params = {}
+        params: Dict = {}
         if filters.get("userId"):
             where.append("sys_device.userId = :userId")
             params["userId"] = filters["userId"]
         if filters.get("deviceId"):
-            where.append("deviceId = :deviceId")
+            where.append("sys_device.deviceId = :deviceId")
             params["deviceId"] = filters["deviceId"]
         if filters.get("deviceName"):
-            where.append("deviceName LIKE :deviceName")
+            where.append("sys_device.deviceName LIKE :deviceName")
             params["deviceName"] = f"%{filters['deviceName']}%"
         if filters.get("roleName"):
-            where.append("roleName LIKE :roleName")
+            where.append("sys_role.roleName LIKE :roleName")
             params["roleName"] = f"%{filters['roleName']}%"
         if filters.get("state"):
             where.append("sys_device.state = :state")
@@ -29,24 +29,34 @@ class SysDeviceService:
         if filters.get("roleId"):
             where.append("sys_device.roleId = :roleId")
             params["roleId"] = filters["roleId"]
+        return " AND ".join(where), params
 
-        where_sql = " AND ".join(where)
-        total_sql = f"SELECT count(*) FROM sys_device LEFT JOIN sys_role ON sys_device.roleId = sys_role.roleId WHERE {where_sql}"
-        total = db().fetch_value(total_sql, params) or 0
-
-        sql = (
+    def _select_sql(self, where_sql: str) -> str:
+        return (
             "SELECT sys_device.deviceId, sys_device.deviceName, sys_device.ip, sys_device.wifiName, "
             "sys_device.chipModelName, sys_device.type, sys_device.version, sys_device.state, "
             "sys_device.roleId, sys_device.userId, sys_device.lastLogin, sys_device.createTime, sys_device.location, "
             "sys_role.roleName, sys_role.roleDesc, sys_role.voiceName, sys_role.modelId, sys_role.sttId, sys_role.ttsId, "
             "sys_role.vadSpeechTh, sys_role.vadSilenceTh, sys_role.vadEnergyTh, sys_role.vadSilenceMs, "
             "(SELECT COUNT(*) FROM sys_message WHERE sys_message.deviceId = sys_device.deviceId AND sys_message.state = '1') AS totalMessage "
-            f"FROM sys_device LEFT JOIN sys_role ON sys_device.roleId = sys_role.roleId WHERE {where_sql} "
-            "LIMIT :limit OFFSET :offset"
+            "FROM sys_device LEFT JOIN sys_role ON sys_device.roleId = sys_role.roleId "
+            f"WHERE {where_sql} "
         )
+
+    def query(self, filters: Dict, page_num: int, page_size: int) -> Dict:
+        where_sql, params = self._build_query_conditions(filters)
+        total_sql = f"SELECT count(*) FROM sys_device LEFT JOIN sys_role ON sys_device.roleId = sys_role.roleId WHERE {where_sql}"
+        total = db().fetch_value(total_sql, params) or 0
+
+        sql = self._select_sql(where_sql) + "ORDER BY sys_device.createTime DESC LIMIT :limit OFFSET :offset"
         params.update({"limit": page_size, "offset": (page_num - 1) * page_size})
         rows = db().fetch_all(sql, params)
         return build_page(rows, int(total), page_num, page_size)
+
+    def query_all(self, filters: Dict) -> List[Dict]:
+        where_sql, params = self._build_query_conditions(filters)
+        sql = self._select_sql(where_sql) + "ORDER BY sys_device.createTime DESC"
+        return db().fetch_all(sql, params)
 
     def select_device_by_id(self, device_id: str) -> Optional[Dict]:
         sql = (
@@ -111,13 +121,16 @@ class SysDeviceService:
         sql = (
             "INSERT INTO sys_device (deviceId, deviceName, type, userId, roleId) VALUES (:deviceId, :deviceName, :type, :userId, :roleId)"
         )
-        return db().execute(sql, {
-            "deviceId": device.get("deviceId"),
-            "deviceName": device.get("deviceName"),
-            "type": device.get("type"),
-            "userId": device.get("userId"),
-            "roleId": device.get("roleId"),
-        })
+        return db().execute(
+            sql,
+            {
+                "deviceId": device.get("deviceId"),
+                "deviceName": device.get("deviceName"),
+                "type": device.get("type"),
+                "userId": device.get("userId"),
+                "roleId": device.get("roleId"),
+            },
+        )
 
     def delete(self, device_id: str, user_id: int) -> int:
         sql = "DELETE FROM sys_device WHERE deviceId = :deviceId AND userId = :userId"

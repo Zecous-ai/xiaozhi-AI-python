@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+import json
+import time
+import uuid
+
+from fastapi import APIRouter, Depends, Request
 
 from app.core.deps import get_current_user
 from app.core.response import ResultMessage, ResultStatus
@@ -10,7 +14,9 @@ from app.services.device_service import SysDeviceService
 from app.services.permission_service import SysPermissionService
 from app.services.role_service import SysRoleService
 from app.services.template_service import SysTemplateService
+from app.services.user_auth_service import SysUserAuthService
 from app.services.user_service import SysUserService
+from app.services.wx_login_service import WxLoginService
 from app.utils.captcha_utils import generate_code, send_email_captcha, send_sms_captcha
 from app.utils.dto import permission_list_to_dto, role_to_dto, user_to_dto
 from app.utils.request_utils import parse_body
@@ -24,6 +30,33 @@ template_service = SysTemplateService()
 device_service = SysDeviceService()
 auth_role_service = SysAuthRoleService()
 permission_service = SysPermissionService()
+user_auth_service = SysUserAuthService()
+wx_login_service = WxLoginService()
+
+
+def _generate_wechat_username(openid: str) -> str:
+    base = f"wx_{openid[:10]}"
+    username = base
+    suffix = 1
+    while user_service.select_user_by_username(username):
+        username = f"{base}_{suffix}"
+        suffix += 1
+    return username
+
+
+def _auto_register_wechat_user(openid: str, union_id: str | None) -> dict | None:
+    username = _generate_wechat_username(openid)
+    user = {
+        "username": username,
+        "name": f"微信用户{int(time.time() * 1000) % 10000:04d}",
+        "password": encrypt_password(uuid.uuid4().hex),
+        "roleId": 2,
+        "wxOpenId": openid,
+        "wxUnionId": union_id,
+    }
+    if user_service.add(user) <= 0:
+        return None
+    return user_service.select_user_by_username(username)
 
 
 @router.get("/check-token")
@@ -102,7 +135,7 @@ async def login(request: Request):
 async def tel_login(request: Request):
     data = await parse_body(request)
     tel = data.get("tel")
-    code = data.get("code")
+    code = data.get("code") or data.get("verifyCode")
     if not tel or not code:
         return ResultMessage.error("参数错误")
     if user_service.query_captcha(code, tel) < 1:
@@ -128,7 +161,76 @@ async def tel_login(request: Request):
 
 @router.post("/wx-login")
 async def wx_login(request: Request):
-    return ResultMessage.error("微信登录暂未实现", code=ResultStatus.NOT_IMPLEMENTED)
+    data = await parse_body(request)
+    code = data.get("code")
+    if not code:
+        return ResultMessage.error("微信登录code不能为空")
+
+    try:
+        wx_login_info = await wx_login_service.get_wx_login_info(str(code))
+    except ValueError as exc:
+        return ResultMessage.error(str(exc))
+    except Exception as exc:
+        return ResultMessage.error(f"微信登录失败: {exc}")
+
+    openid = wx_login_info.get("openid")
+    union_id = wx_login_info.get("unionid")
+    if not openid:
+        return ResultMessage.error("获取微信openid失败")
+
+    try:
+        user_auth = user_auth_service.select_by_openid_and_platform(openid, "wechat")
+    except Exception:
+        user_auth = None
+    user = None
+    is_new_user = False
+
+    if user_auth:
+        user_id = user_auth.get("user_id") or user_auth.get("userId")
+        if user_id:
+            user = user_service.select_user_by_user_id(int(user_id))
+
+    if not user:
+        user = user_service.select_user_by_wx_open_id(openid)
+
+    if not user:
+        user = _auto_register_wechat_user(openid, union_id)
+        is_new_user = True
+        if not user:
+            return ResultMessage.error("微信登录失败")
+
+    if not user_auth:
+        auth_payload = {
+            "userId": user.get("userId"),
+            "openId": openid,
+            "unionId": union_id,
+            "platform": "wechat",
+            "profile": json.dumps(wx_login_info, ensure_ascii=False),
+        }
+        try:
+            user_auth_service.insert(auth_payload)
+        except Exception:
+            pass
+
+    if user.get("wxOpenId") != openid or (union_id and user.get("wxUnionId") != union_id):
+        user_service.update({"userId": user.get("userId"), "wxOpenId": openid, "wxUnionId": union_id})
+        user = user_service.select_user_by_user_id(user.get("userId")) or user
+
+    token = token_manager().create_token(user.get("userId"))
+    role = auth_role_service.select_by_id(user.get("roleId"))
+    permissions = permission_service.select_by_user_id(user.get("userId"))
+    permission_tree = permission_service.build_permission_tree(permissions)
+    response = {
+        "token": token,
+        "refreshToken": token,
+        "expiresIn": 2592000,
+        "userId": user.get("userId"),
+        "isNewUser": is_new_user,
+        "user": user_to_dto(user),
+        "role": role_to_dto(role),
+        "permissions": permission_list_to_dto(permission_tree),
+    }
+    return ResultMessage.success(data=response)
 
 
 @router.post("")
@@ -139,7 +241,7 @@ async def register(request: Request):
     name = data.get("name")
     email = data.get("email")
     tel = data.get("tel")
-    code = data.get("code")
+    code = data.get("code") or data.get("verifyCode")
     if user_service.query_captcha(code, email or tel) < 1:
         return ResultMessage.error("无效验证码")
 
@@ -301,7 +403,11 @@ async def send_sms(request: Request):
 async def check_captcha(request: Request):
     code = request.query_params.get("code")
     email = request.query_params.get("email")
-    if user_service.query_captcha(code, email) > 0:
+    tel = request.query_params.get("tel")
+    email_or_tel = email or tel
+    if not code or not email_or_tel:
+        return ResultMessage.error("参数错误")
+    if user_service.query_captcha(code, email_or_tel) > 0:
         return ResultMessage.success()
     return ResultMessage.error("验证码错误或已过期")
 
@@ -309,9 +415,14 @@ async def check_captcha(request: Request):
 @router.get("/checkUser")
 async def check_user(request: Request):
     username = request.query_params.get("username")
-    if not username:
+    tel = request.query_params.get("tel")
+    email = request.query_params.get("email")
+    if not any([username, tel, email]):
         return ResultMessage.error("参数错误")
-    user = user_service.select_user_by_username(username)
-    if user:
+    if tel and user_service.select_user_by_tel(tel):
+        return ResultMessage.error("手机已注册")
+    if email and user_service.select_user_by_email(email):
+        return ResultMessage.error("邮箱已注册")
+    if username and user_service.select_user_by_username(username):
         return ResultMessage.error("用户名已存在")
     return ResultMessage.success()

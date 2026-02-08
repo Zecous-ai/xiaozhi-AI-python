@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
 from datetime import datetime
 
@@ -41,7 +43,7 @@ async def query_devices(request: Request, user=Depends(get_current_user)):
 async def batch_update(request: Request, user=Depends(get_current_user)):
     data = await parse_body(request)
     device_ids = (data.get("deviceIds") or "").split(",")
-    device_ids = [d.strip() for d in device_ids if d.strip()]
+    device_ids = [device_id.strip() for device_id in device_ids if device_id.strip()]
     if not device_ids:
         return ResultMessage.error("设备ID格式不正确")
     role_id = data.get("roleId")
@@ -104,8 +106,57 @@ async def delete_device(device_id: str, user=Depends(get_current_user)):
 
 
 @router.get("/export")
-async def export_devices(user=Depends(get_current_user)):
-    return ResultMessage.error("未实现")
+async def export_devices(request: Request, user=Depends(get_current_user)):
+    params = request.query_params
+    filters = {
+        "userId": user.get("userId"),
+        "deviceId": params.get("deviceId"),
+        "deviceName": params.get("deviceName"),
+        "roleName": params.get("roleName"),
+        "state": params.get("state"),
+        "roleId": params.get("roleId"),
+    }
+    devices = device_service.query_all(filters)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(
+        [
+            "deviceId",
+            "deviceName",
+            "type",
+            "state",
+            "roleName",
+            "lastLogin",
+            "createTime",
+            "ip",
+            "wifiName",
+            "chipModelName",
+            "version",
+            "totalMessage",
+        ]
+    )
+    for item in devices:
+        writer.writerow(
+            [
+                item.get("deviceId") or "",
+                item.get("deviceName") or "",
+                item.get("type") or "",
+                item.get("state") or "",
+                item.get("roleName") or "",
+                item.get("lastLogin") or "",
+                item.get("createTime") or "",
+                item.get("ip") or "",
+                item.get("wifiName") or "",
+                item.get("chipModelName") or "",
+                item.get("version") or "",
+                item.get("totalMessage") or 0,
+            ]
+        )
+
+    filename = f"device_export_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return Response(content="﻿" + output.getvalue(), media_type="text/csv; charset=utf-8", headers=headers)
 
 
 @router.post("/ota")
@@ -123,7 +174,8 @@ async def ota(
 
     device_id = device_id or data.get("mac_address") or data.get("mac")
     if not is_mac_address_valid(device_id):
-        return Response(content=json.dumps({"error": "设备ID不正确"}, ensure_ascii=False), media_type="application/json", status_code=400)
+        error_msg = "设备ID不正确"
+        return Response(content=json.dumps({"error": error_msg}, ensure_ascii=False), media_type="application/json", status_code=400)
 
     device = {
         "deviceId": device_id,

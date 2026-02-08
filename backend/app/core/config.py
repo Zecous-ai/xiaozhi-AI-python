@@ -71,6 +71,10 @@ class Settings(BaseSettings):
     sms_aliyun_sign_name: str | None = None
     sms_aliyun_template_code: str | None = None
 
+    # Wechat
+    wechat_appid: str | None = None
+    wechat_secret: str | None = None
+
     # Email
     email_host: str | None = None
     email_port: int = 465

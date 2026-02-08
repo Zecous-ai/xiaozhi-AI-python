@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.concurrency import run_in_threadpool
 
 from app.core.deps import get_current_user
 from app.core.response import ResultMessage
-from app.dialogue.tts_service import EdgeTtsService
+from app.dialogue.tts.factory import TtsServiceFactory
+from app.services.config_service import SysConfigService
 from app.services.role_service import SysRoleService
 from app.utils.request_utils import parse_body
 
 
 router = APIRouter()
 role_service = SysRoleService()
+config_service = SysConfigService()
+tts_factory = TtsServiceFactory()
 
 
 @router.get("")
@@ -60,15 +64,33 @@ async def delete_role(role_id: int, user=Depends(get_current_user)):
 @router.get("/testVoice")
 async def test_voice(request: Request, user=Depends(get_current_user)):
     params = request.query_params
-    provider = params.get("provider")
+    provider = (params.get("provider") or "edge").lower()
     voice_name = params.get("voiceName") or "zh-CN-XiaoxiaoNeural"
     message = params.get("message") or "语音合成测试"
-    tts_pitch = float(params.get("ttsPitch") or 1.0)
-    tts_speed = float(params.get("ttsSpeed") or 1.0)
-    if provider == "edge":
-        service = EdgeTtsService(voice_name, tts_pitch, tts_speed)
-        audio_path = await service.text_to_speech(message)
+
+    try:
+        tts_pitch = float(params.get("ttsPitch") or 1.0)
+        tts_speed = float(params.get("ttsSpeed") or 1.0)
+    except ValueError:
+        return ResultMessage.error("参数错误")
+
+    tts_config = None
+    if provider != "edge":
+        tts_id = params.get("ttsId")
+        if not tts_id:
+            return ResultMessage.error("请先到语音合成配置页面配置对应Key")
+        try:
+            tts_config = config_service.select_config_by_id(int(tts_id))
+        except ValueError:
+            return ResultMessage.error("参数错误")
+        if not tts_config:
+            return ResultMessage.error("请先到语音合成配置页面配置对应Key")
+
+    try:
+        service = tts_factory.get_tts_service(tts_config, voice_name, tts_pitch, tts_speed)
+        audio_path = await run_in_threadpool(service.text_to_speech, message)
         result = ResultMessage.success()
         result["data"] = audio_path
         return result
-    return ResultMessage.error("暂不支持该语音服务商")
+    except Exception:
+        return ResultMessage.error()

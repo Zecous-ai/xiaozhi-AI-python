@@ -109,8 +109,8 @@ class SysUserService:
 
     def add(self, user: Dict) -> int:
         sql = (
-            "INSERT INTO sys_user (username, `name`, tel, email, password, wxOpenId, state, roleId, isAdmin) "
-            "VALUES (:username, :name, :tel, :email, :password, :wxOpenId, '1', :roleId, '0')"
+            "INSERT INTO sys_user (username, `name`, tel, email, password, wxOpenId, wxUnionId, state, roleId, isAdmin) "
+            "VALUES (:username, :name, :tel, :email, :password, :wxOpenId, :wxUnionId, '1', :roleId, '0')"
         )
         return db().execute(
             sql,
@@ -121,6 +121,7 @@ class SysUserService:
                 "email": user.get("email"),
                 "password": user.get("password"),
                 "wxOpenId": user.get("wxOpenId"),
+                "wxUnionId": user.get("wxUnionId"),
                 "roleId": user.get("roleId", 2),
             },
         )
@@ -128,7 +129,7 @@ class SysUserService:
     def update(self, user: Dict) -> int:
         sets = []
         params = {}
-        for key in ["name", "tel", "email", "password", "avatar", "roleId", "wxOpenId", "state"]:
+        for key in ["name", "tel", "email", "password", "avatar", "roleId", "wxOpenId", "wxUnionId", "state"]:
             if user.get(key) not in (None, ""):
                 sets.append(f"{key} = :{key}")
                 params[key] = user.get(key)

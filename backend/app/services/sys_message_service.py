@@ -7,15 +7,18 @@ from app.utils.pagination import build_page
 
 
 class SysMessageService:
-    def query(self, filters: Dict, page_num: int, page_size: int) -> Dict:
+    def _build_query_conditions(self, filters: Dict) -> tuple[str, Dict]:
         where = ["sys_message.state = 1"]
-        params = {}
+        params: Dict = {}
         if filters.get("userId"):
             where.append("sys_device.userId = :userId")
             params["userId"] = filters["userId"]
         if filters.get("deviceId"):
             where.append("sys_message.deviceId = :deviceId")
             params["deviceId"] = filters["deviceId"]
+        if filters.get("roleId"):
+            where.append("sys_message.roleId = :roleId")
+            params["roleId"] = filters["roleId"]
         if filters.get("messageType"):
             where.append("sys_message.messageType = :messageType")
             params["messageType"] = filters["messageType"]
@@ -29,25 +32,35 @@ class SysMessageService:
         if filters.get("sender"):
             where.append("sys_message.sender = :sender")
             params["sender"] = filters["sender"]
+        return " AND ".join(where), params
 
-        where_sql = " AND ".join(where)
+    def _select_sql(self, where_sql: str) -> str:
+        return (
+            "SELECT sys_message.messageId, sys_message.deviceId, sys_message.message, sys_message.sender, sys_message.roleId, "
+            "sys_message.state, sys_message.createTime, sys_message.messageType, sys_device.deviceName, sys_device.userId, sys_role.roleName "
+            "FROM sys_message "
+            "LEFT JOIN sys_device ON sys_message.deviceId = sys_device.deviceId "
+            "LEFT JOIN sys_role ON sys_message.roleId = sys_role.roleId "
+            f"WHERE {where_sql} "
+        )
+
+    def query(self, filters: Dict, page_num: int, page_size: int) -> Dict:
+        where_sql, params = self._build_query_conditions(filters)
         total_sql = (
             "SELECT count(*) FROM sys_message LEFT JOIN sys_device ON sys_message.deviceId = sys_device.deviceId "
             f"WHERE {where_sql}"
         )
         total = db().fetch_value(total_sql, params) or 0
 
-        sql = (
-            "SELECT sys_message.messageId, sys_message.deviceId, sys_message.message, sys_message.sender, sys_message.roleId, "
-            "sys_message.state, sys_message.createTime, sys_message.messageType, sys_device.deviceName, sys_device.userId, sys_role.roleName "
-            "FROM sys_message "
-            "LEFT JOIN sys_device ON sys_message.deviceId = sys_device.deviceId "
-            "LEFT JOIN sys_role ON sys_message.roleId = sys_role.roleId "
-            f"WHERE {where_sql} ORDER BY sys_message.createTime DESC, sender DESC LIMIT :limit OFFSET :offset"
-        )
+        sql = self._select_sql(where_sql) + "ORDER BY sys_message.createTime DESC, sender DESC LIMIT :limit OFFSET :offset"
         params.update({"limit": page_size, "offset": (page_num - 1) * page_size})
         rows = db().fetch_all(sql, params)
         return build_page(rows, int(total), page_num, page_size)
+
+    def query_all(self, filters: Dict) -> List[Dict]:
+        where_sql, params = self._build_query_conditions(filters)
+        sql = self._select_sql(where_sql) + "ORDER BY sys_message.createTime DESC, sender DESC"
+        return db().fetch_all(sql, params)
 
     def find(self, device_id: str, role_id: int, limit: int) -> List[Dict]:
         sql = (
@@ -81,9 +94,9 @@ class SysMessageService:
         for idx, msg in enumerate(messages):
             keys = ["deviceId", "sessionId", "sender", "roleId", "message", "messageType", "createTime"]
             placeholders = []
-            for k in keys:
-                param_key = f"{k}_{idx}"
-                params[param_key] = msg.get(k)
+            for key in keys:
+                param_key = f"{key}_{idx}"
+                params[param_key] = msg.get(key)
                 placeholders.append(f":{param_key}")
             values.append(f"({', '.join(placeholders)})")
         sql = (
