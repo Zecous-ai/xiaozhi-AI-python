@@ -7,6 +7,10 @@ from app.utils.pagination import build_page
 
 
 class SysTemplateService:
+    @staticmethod
+    def _is_default_enabled(value) -> bool:
+        return str(value) == "1"
+
     def query(
         self,
         user_id: int,
@@ -47,6 +51,8 @@ class SysTemplateService:
         return db().fetch_one(sql, {"templateId": template_id})
 
     def add(self, template: Dict) -> int:
+        if self._is_default_enabled(template.get("isDefault")):
+            self.reset_default(int(template.get("userId")))
         sql = (
             "INSERT INTO sys_template (userId, templateName, templateDesc, templateContent, category, createTime, updateTime) "
             "VALUES (:userId, :templateName, :templateDesc, :templateContent, :category, now(), now())"
@@ -54,6 +60,8 @@ class SysTemplateService:
         return db().execute(sql, template)
 
     def update(self, template: Dict) -> int:
+        if self._is_default_enabled(template.get("isDefault")):
+            self.reset_default(int(template.get("userId")))
         sets = []
         params = {"templateId": template.get("templateId"), "userId": template.get("userId")}
         for key in ["templateName", "templateDesc", "templateContent", "category", "isDefault", "state"]:

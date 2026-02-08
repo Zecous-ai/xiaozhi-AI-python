@@ -7,6 +7,10 @@ from app.utils.pagination import build_page
 
 
 class SysRoleService:
+    @staticmethod
+    def _is_default_enabled(value) -> bool:
+        return str(value) == "1"
+
     def query(self, filters: Dict, page_num: int | None = None, page_size: int | None = None) -> Dict | List[Dict]:
         where = ["sys_role.state = 1"]
         params = {}
@@ -58,6 +62,8 @@ class SysRoleService:
         return db().fetch_one(sql, {"roleId": role_id})
 
     def add(self, role: Dict) -> int:
+        if self._is_default_enabled(role.get("isDefault")):
+            self.reset_default(int(role.get("userId")))
         sql = (
             "INSERT INTO sys_role (avatar, roleName, roleDesc, voiceName, ttsPitch, ttsSpeed, modelId, ttsId, sttId, memoryType, "
             "temperature, topP, userId, isDefault) VALUES (:avatar, :roleName, :roleDesc, :voiceName, :ttsPitch, :ttsSpeed, :modelId, "
@@ -66,6 +72,8 @@ class SysRoleService:
         return db().execute(sql, role)
 
     def update(self, role: Dict) -> int:
+        if self._is_default_enabled(role.get("isDefault")):
+            self.reset_default(int(role.get("userId")))
         sets = ["avatar = :avatar"]
         params = {"avatar": role.get("avatar")}
         for key in [
